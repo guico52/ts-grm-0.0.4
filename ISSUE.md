@@ -68,6 +68,16 @@ This is a deliberate but **single-strategy** implementation: there is no single-
 
 **Why this breaks real-world usage**: when the schema is created by external DDL (Prisma, plain SQL, etc.) as flat tables — which is the natural shape for this kind of inheritance — the base table does not exist. Any query that touches `createdAt`/`createdBy`/`enterpriseId` (i.e. almost every real query on an inherited model) fails with `relation "base" does not exist`.
 
+**Impact on `createSchema` (init SQL)**: the same JTI strategy shows up in DDL generation. `client.createSchema()` produces a separate base table plus a child table linked by an inheritance foreign key, instead of a single flat table:
+
+```sql
+create table base(id text not null, ENTITY_TYPE text not null, created_by text not null, updated_by text not null)
+create table child(id text not null, name text not null)
+alter table child add constraint child_constraint_2 foreign key(id) references base(id) on delete cascade
+```
+
+So the incompatibility is bidirectional: (a) external single-table DDL + ts-grm queries → JOIN to a non-existent base table; (b) ts-grm-generated init SQL → a two-table JTI shape that contradicts the single-table assumption of Prisma/other ORMs. Repro test (4) asserts this DDL.
+
 **Not PostgreSQL-specific**: no driver in `@ts-grm/sql` uses the PostgreSQL `INHERITS` syntax; the JOIN is generated identically for SQLite/PostgreSQL/MySQL/Oracle/SQL Server.
 
 **Suggested fix**:
