@@ -96,3 +96,40 @@ test("复现：where 继承字段 createdAt → 同样 JOIN 基类表", async ()
     assert.ok(sql, "应生成 SQL");
     assert.ok(/join/i.test(sql), "生成了对基类表的 JOIN（问题复现）");
 });
+
+test("建表侧：createSchema 对继承模型生成独立基类表 + 继承外键（JTI）", async () => {
+    // createSchema 需要 entityManager；DDL 由 SchemaImpl.creationSqlArray 提供，
+    // 不需要真实数据库（此处仅打印 SQL，不断言执行）
+    const { EntityManager } = await import("@ts-grm/core");
+    const Base2 = model("Base2", "id", class {
+        id = prop.str(36)
+        createdBy = prop.str(36)
+        updatedBy = prop.str(36)
+    }, ctx => ctx.table({ discriminator: "ENTITY_TYPE", discriminatorValue: "Base2" }));
+    const Child2 = model.extends(Base2)("Child2", class {
+        name = prop.str(36)
+    }, ctx => ctx.table({ discriminatorValue: "Child2" }));
+
+    const fakePool2 = {
+        connect: async () => ({
+            query: async () => { throw new Error("不应转发"); },
+            release: () => {},
+        }),
+    };
+    const client2 = newSqlClient(new PostgresDriver(fakePool2), {
+        entityManager: EntityManager.combine(Base2, Child2),
+        strategy: namingStrategy,
+        executorCreator: () => ({
+            execute: async () => {},
+            executeStatement: async () => [],
+            executeStatements: async () => [],
+        }),
+    });
+    const schema = await client2.createSchema();
+    const sqls = schema.creationSqlArray.join("\n\n");
+    console.log("[场景4] createSchema 建表 SQL（继承模型）:\n" + sqls);
+    assert.ok(sqls.includes("create table base2"), "生成了独立基类表 base2");
+    assert.ok(sqls.includes("created_by"), "继承字段 created_by 落在基类表");
+    assert.ok(sqls.includes("create table child2"), "生成了子表 child2");
+    assert.ok(/references base2\(id\)/i.test(sqls), "子表通过继承外键引用基类表（JTI）");
+});

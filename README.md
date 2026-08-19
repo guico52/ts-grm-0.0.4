@@ -17,6 +17,8 @@
   ```
 
 - **边界**：只查询子类自身字段（含继承来的 `id`）时不 JOIN；一旦触碰继承字段即 JOIN。
+- **建表侧同样如此**：`createSchema`（初始化建表 SQL）对继承模型生成**独立基类表 + 子表 + 继承外键**，
+  继承字段落在基类表，子表只有自身列（见下方"建表侧"）。
 
 ## 运行
 
@@ -45,6 +47,33 @@ const Child = model.extends(Base)("Child", class {
 // select 继承字段 createdAt：
 // → from child inner join base on child.id = base.id（基类表 base 不存在时查询失败）
 ```
+
+## 建表侧（`createSchema` 生成的 init SQL）
+
+```sql
+-- Entity table for "Base"
+create table base(
+    id text not null,
+    ENTITY_TYPE text not null,      -- discriminator（多态）
+    created_by text not null,       -- 继承字段落在基类表
+    updated_by text not null
+)
+alter table base add constraint base_constraint_2
+    check(ENTITY_TYPE in('Base', 'Child'))   -- 多态 check
+
+-- Entity table for "Child"
+create table child(
+    id text not null,
+    name text not null              -- 子表只有自身字段
+)
+alter table child add constraint child_constraint_2
+    foreign key(id) references base(id) on delete cascade   -- 继承外键
+```
+
+即：**用 ts-grm 生成 init SQL 会建出"基类表 + 子表"两套表**；而 Prisma 等外部 DDL 对同一
+继承模型建的是**单表**（子表直接包含 `created_by` 等全部列）。两套表结构互不兼容，
+这正是查询侧 JOIN 基类表（场景 2/3）的根本原因——JTI 在 ts-grm 自己的建表体系内自洽，
+但对外部建表的单表结构不成立。
 
 ## 分析（供对照）
 

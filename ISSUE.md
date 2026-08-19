@@ -56,7 +56,12 @@ select tb_1_.id, tb_1_.name from child tb_1_ where tb_1_.name = $1
 **Scenario**: `Child extends Base`, `Base` declares `id`/`createdAt`/`updatedAt`, `Child` declares `name`.
 
 **Root cause**: ts-grm models inheritance as **joined-table inheritance (JTI)** at the ORM level:
-- `createSchema` (`_processEntity`) creates a separate table per inheritance level, and the inheritance link is expressed as an implicit foreign key (`-- Implicit foreign key constraint for inheritance`);
+- `createSchema` (`_processEntity`) creates a separate table per inheritance level, and the inheritance link is expressed as an implicit foreign key (`-- Implicit foreign key constraint for inheritance`). The generated DDL is self-consistent JTI:
+  ```sql
+  create table base(id text not null, ENTITY_TYPE text not null, created_by text not null, updated_by text not null)
+  create table child(id text not null, name text not null)
+  alter table child add constraint child_constraint_2 foreign key(id) references base(id) on delete cascade
+  ```
 - query compilation (`_addJoinByInheritance` in `@ts-grm/sql`, driver-independent) emits `inner join <base-table> on <child>.id = <base>.id` whenever an inherited property is referenced.
 
 This is a deliberate but **single-strategy** implementation: there is no single-table inheritance (STI) option that inlines base fields into the child table.
@@ -79,7 +84,7 @@ npm install   # installs only @ts-grm/core@0.0.4 + @ts-grm/sql@0.0.4
 npm test
 ```
 
-The repro package contains three tests: (1) control — selecting only subclass fields produces no JOIN; (2) selecting an inherited field produces a JOIN to the base table; (3) filtering on an inherited field also produces a JOIN. All three print the generated SQL to the console.
+The repro package contains four tests: (1) control — selecting only subclass fields produces no JOIN; (2) selecting an inherited field produces a JOIN to the base table; (3) filtering on an inherited field also produces a JOIN; (4) `createSchema` generates a separate base table plus a child table linked by an inheritance foreign key (JTI DDL). All four print the generated SQL/DDL to the console.
 
 ### Relation Model
 
